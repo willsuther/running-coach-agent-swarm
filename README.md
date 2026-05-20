@@ -294,7 +294,43 @@ launch(share=True)  # Generates a public gradio.live URL
 
 ---
 
-## Why This Is Not a Demo
+## Known Limitations & Workarounds
+
+### ChromaDB Embedding Function Conflict
+
+**Issue:** ChromaDB's built-in `GoogleGenerativeAiEmbeddingFunction` uses an older version of `google-api-core` that conflicts with the current `google-generativeai` package in Colab. Calling it after `genai.configure()` raises:
+```
+ValueError: ClientOptions does not accept an option 'headers'
+```
+
+**Workaround:** All ChromaDB queries use a custom `GeminiEmbedder` class that calls the Gemini embedding REST API directly, bypassing the conflicting client entirely:
+
+```python
+import requests
+
+class GeminiEmbedder:
+    def __init__(self, api_key, model='models/gemini-embedding-001'):
+        self.api_key = api_key
+        self.model   = model
+        self.name    = 'gemini-embedder'
+    def __call__(self, input):
+        embeddings = []
+        for text in input:
+            url  = f'https://generativelanguage.googleapis.com/v1beta/{self.model}:embedContent?key={self.api_key}'
+            resp = requests.post(url, json={'model': self.model, 'content': {'parts': [{'text': text}]}})
+            embeddings.append(resp.json()['embedding']['values'])
+        return embeddings
+```
+
+Collections must be retrieved with `get_collection(name)` (no `embedding_function` argument) and queried with `query_embeddings=[vector]` rather than `query_texts`. This pattern is used consistently across the demo notebook and all agent code.
+
+### Gemini API Timeouts
+
+The Gemini API occasionally returns 503 errors or times out under load, particularly for the Planner Agent which sends longer prompts. The agents include retry logic (`for attempt in range(3)`) and the Coordinator degrades gracefully when a subagent fails — delivering the successful agent's response rather than crashing. If timeouts persist, wait a few minutes and retry; this is an API availability issue, not a code issue.
+
+---
+
+
 
 Every component of this system runs on real personal training data:
 
